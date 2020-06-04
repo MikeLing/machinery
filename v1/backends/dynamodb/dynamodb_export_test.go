@@ -25,13 +25,35 @@ var (
 
 type TestDynamoDBClient struct {
 	dynamodbiface.DynamoDBAPI
+	PutItemOverride      func(*dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error)
+	UpdateItemOverride   func(*dynamodb.UpdateItemInput) (*dynamodb.UpdateItemOutput, error)
+	GetItemOverride      func(input *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error)
+	BatchGetItemOverride func(*dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error)
 }
 
-func (t *TestDynamoDBClient) PutItem(*dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error) {
+func (t *TestDynamoDBClient) ResetOverrides() {
+	t.PutItemOverride = nil
+	t.UpdateItemOverride = nil
+	t.BatchGetItemOverride = nil
+}
+
+func (t *TestDynamoDBClient) PutItem(input *dynamodb.PutItemInput) (*dynamodb.PutItemOutput, error) {
+	if t.PutItemOverride != nil {
+		return t.PutItemOverride(input)
+	}
 	return &dynamodb.PutItemOutput{}, nil
+}
+func (t *TestDynamoDBClient) BatchGetItem(input *dynamodb.BatchGetItemInput) (*dynamodb.BatchGetItemOutput, error) {
+	if t.BatchGetItemOverride != nil {
+		return t.BatchGetItemOverride(input)
+	}
+	return &dynamodb.BatchGetItemOutput{}, nil
 }
 
 func (t *TestDynamoDBClient) GetItem(input *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
+	if t.GetItemOverride != nil {
+		return t.GetItemOverride(input)
+	}
 	var output *dynamodb.GetItemOutput
 	switch *input.TableName {
 	case "group_metas":
@@ -104,7 +126,10 @@ func (t *TestDynamoDBClient) DeleteItem(*dynamodb.DeleteItemInput) (*dynamodb.De
 	return &dynamodb.DeleteItemOutput{}, nil
 }
 
-func (t *TestDynamoDBClient) UpdateItem(*dynamodb.UpdateItemInput) (*dynamodb.UpdateItemOutput, error) {
+func (t *TestDynamoDBClient) UpdateItem(input *dynamodb.UpdateItemInput) (*dynamodb.UpdateItemOutput, error) {
+	if t.UpdateItemOverride != nil {
+		return t.UpdateItemOverride(input)
+	}
 	return &dynamodb.UpdateItemOutput{}, nil
 }
 
@@ -208,7 +233,7 @@ func (b *Backend) LockGroupMetaForTest(groupUUID string) error {
 }
 
 func (b *Backend) GetStatesForTest(taskUUIDs ...string) ([]*tasks.TaskState, error) {
-	return b.getStates(taskUUIDs...)
+	return b.getStates(taskUUIDs)
 }
 
 func (b *Backend) UpdateToFailureStateWithErrorForTest(taskState *tasks.TaskState) error {
