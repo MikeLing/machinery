@@ -3,10 +3,11 @@ package machinery
 import (
 	"errors"
 	"fmt"
-	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
+
+	neturl "net/url"
 
 	"github.com/RichardKnop/machinery/v1/config"
 
@@ -25,6 +26,10 @@ import (
 	mongobackend "github.com/RichardKnop/machinery/v1/backends/mongo"
 	nullbackend "github.com/RichardKnop/machinery/v1/backends/null"
 	redisbackend "github.com/RichardKnop/machinery/v1/backends/redis"
+
+	eagerlock "github.com/RichardKnop/machinery/v1/locks/eager"
+	lockiface "github.com/RichardKnop/machinery/v1/locks/iface"
+	redislock "github.com/RichardKnop/machinery/v1/locks/redis"
 )
 
 // BrokerFactory creates a new object of iface.Broker
@@ -38,11 +43,17 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 		return amqpbroker.New(cnf), nil
 	}
 
-	if strings.HasPrefix(cnf.Broker, "redis://") {
-		parts := strings.Split(cnf.Broker, "redis://")
+	if strings.HasPrefix(cnf.Broker, "redis://") || strings.HasPrefix(cnf.Broker, "rediss://") {
+		var scheme string
+		if strings.HasPrefix(cnf.Broker, "redis://") {
+			scheme = "redis://"
+		} else {
+			scheme = "rediss://"
+		}
+		parts := strings.Split(cnf.Broker, scheme)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf(
-				"Redis broker connection string should be in format redis://host:port, instead got %s",
+				"Redis broker connection string should be in format %shost:port, instead got %s", scheme,
 				cnf.Broker,
 			)
 		}
@@ -99,6 +110,7 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 // BackendFactory creates a new object of backends.Interface
 // Currently supported backends are AMQP/S and Memcache
 func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
+
 	if strings.HasPrefix(cnf.ResultBackend, "amqp://") {
 		return amqpbackend.New(cnf), nil
 	}
@@ -119,8 +131,14 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 		return memcachebackend.New(cnf, servers), nil
 	}
 
-	if strings.HasPrefix(cnf.ResultBackend, "redis://") {
-		parts := strings.Split(cnf.ResultBackend, "redis://")
+	if strings.HasPrefix(cnf.ResultBackend, "redis://") || strings.HasPrefix(cnf.ResultBackend, "rediss://") {
+		var scheme string
+		if strings.HasPrefix(cnf.ResultBackend, "redis://") {
+			scheme = "redis://"
+		} else {
+			scheme = "rediss://"
+		}
+		parts := strings.Split(cnf.ResultBackend, scheme)
 		addrs := strings.Split(parts[1], ",")
 		if len(addrs) > 1 {
 			return redisbackend.NewGR(cnf, addrs, 0), nil
@@ -173,7 +191,7 @@ func ParseRedisURL(url string) (host, password string, db int, err error) {
 	if err != nil {
 		return
 	}
-	if u.Scheme != "redis" {
+	if u.Scheme != "redis" && u.Scheme != "rediss" {
 		err = errors.New("No redis scheme found")
 		return
 	}
@@ -199,6 +217,28 @@ func ParseRedisURL(url string) (host, password string, db int, err error) {
 	}
 
 	return
+}
+
+// LockFactory creates a new object of iface.Lock
+// Currently supported lock is redis
+func LockFactory(cnf *config.Config) (lockiface.Lock, error) {
+	if strings.HasPrefix(cnf.Lock, "eager") {
+		return eagerlock.New(), nil
+	}
+	if strings.HasPrefix(cnf.Lock, "redis://") {
+		parts := strings.Split(cnf.Lock, "redis://")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf(
+				"Redis broker connection string should be in format redis://host:port, instead got %s",
+				cnf.Lock,
+			)
+		}
+		locks := strings.Split(parts[1], ",")
+		return redislock.New(cnf, locks, 0, 3), nil
+	}
+
+	// Lock is required for periodic tasks to work, therefor return in memory lock in case none is configured
+	return eagerlock.New(), nil
 }
 
 // ParseRedisSocketURL extracts Redis connection options from a URL with the
@@ -266,10 +306,10 @@ func ParseGCPPubSubURL(url string) (string, string, error) {
 
 	parts = strings.Split(remainder, "/")
 	if len(parts) == 2 {
-		if len(parts[0]) == 0 {
+		if parts[0] == "" {
 			return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
 		}
-		if len(parts[1]) == 0 {
+		if parts[1] == "" {
 			return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
 		}
 		return parts[0], parts[1], nil

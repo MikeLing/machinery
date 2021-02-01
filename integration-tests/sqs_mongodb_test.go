@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/RichardKnop/machinery/v1"
 	"github.com/RichardKnop/machinery/v1/config"
 )
 
@@ -24,8 +25,9 @@ func TestSQSMongodb(t *testing.T) {
 		DefaultQueue:    "test_queue",
 		ResultsExpireIn: 30,
 		ResultBackend:   fmt.Sprintf("mongodb://%v", mongodbURL),
+		Lock:            "eager",
 	})
-	worker := server.NewWorker("test_worker", 0)
+	worker := server.(*machinery.Server).NewWorker("test_worker", 0)
 	go worker.Launch()
 	testAll(server, t)
 	worker.Quit()

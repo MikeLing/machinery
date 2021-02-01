@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-
+	
 	"github.com/RichardKnop/machinery/v1/backends/amqp"
 	"github.com/RichardKnop/machinery/v1/brokers/errs"
 	"github.com/RichardKnop/machinery/v1/log"
@@ -97,25 +97,22 @@ func (worker *Worker) LaunchAsync(errorsChan chan<- error) {
 
 		// Goroutine Handle SIGINT and SIGTERM signals
 		go func() {
-			for {
-				select {
-				case s := <-sig:
-					log.WARNING.Printf("Signal received: %v", s)
-					signalsReceived++
+			for s := range sig {
+				log.WARNING.Printf("Signal received: %v", s)
+				signalsReceived++
 
-					if signalsReceived < 2 {
-						// After first Ctrl+C start quitting the worker gracefully
-						log.WARNING.Print("Waiting for running tasks to finish before shutting down")
-						go func() {
-							signalWG.Add(1)
-							worker.Quit()
-							errorsChan <- ErrWorkerQuitGracefully
-							signalWG.Done()
-						}()
-					} else {
-						// Abort the program when user hits Ctrl+C second time in a row
-						errorsChan <- ErrWorkerQuitAbruptly
-					}
+				if signalsReceived < 2 {
+					// After first Ctrl+C start quitting the worker gracefully
+					log.WARNING.Print("Waiting for running tasks to finish before shutting down")
+					signalWG.Add(1)
+					go func() {
+						worker.Quit()
+						errorsChan <- ErrWorkerQuitGracefully
+						signalWG.Done()
+					}()
+				} else {
+					// Abort the program when user hits Ctrl+C second time in a row
+					errorsChan <- ErrWorkerQuitAbruptly
 				}
 			}
 		}()

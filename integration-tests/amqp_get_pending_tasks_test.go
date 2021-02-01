@@ -1,13 +1,15 @@
 package integration_test
 
 import (
+	"fmt"
 	"os"
-	"time"
 	"testing"
+	"time"
 
+	"github.com/RichardKnop/machinery/v1"
+	"github.com/RichardKnop/machinery/v1/backends/result"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/tasks"
-	"github.com/RichardKnop/machinery/v1/backends/result"
 )
 
 func TestAmqpGetPendingTasks(t *testing.T) {
@@ -29,12 +31,18 @@ func TestAmqpGetPendingTasks(t *testing.T) {
 		finalAmqpURL = amqpURLs
 	}
 
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		t.Skip("REDIS_URL is not defined")
+	}
+
 	// AMQP broker, AMQP result backend
 	server := testSetup(&config.Config{
 		Broker:                  finalAmqpURL,
 		MultipleBrokerSeparator: finalSeparator,
 		DefaultQueue:            "test_queue",
 		ResultBackend:           amqpURL,
+		Lock:                    fmt.Sprintf("redis://%v", redisURL),
 		AMQP: &config.AMQPConfig{
 			Exchange:      "test_exchange",
 			ExchangeType:  "direct",
@@ -68,12 +76,12 @@ func TestAmqpGetPendingTasks(t *testing.T) {
 		compareSigs(t, signatures[i], pendingMessages[i])
 	}
 
-	worker := server.NewWorker("test_worker", 0)
+	worker := server.(*machinery.Server).NewWorker("test_worker", 0)
 	go worker.Launch()
+	defer worker.Quit()
 	for _, r := range results {
 		r.Get(time.Duration(time.Millisecond * 5))
 	}
-	worker.Quit()
 
 	pendingMessages, err = server.GetBroker().GetPendingTasks(server.GetConfig().DefaultQueue)
 	if err != nil {

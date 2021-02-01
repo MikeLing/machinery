@@ -11,14 +11,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
+	"github.com/go-redsync/redsync/v4"
+
 	"github.com/RichardKnop/machinery/v1/brokers/errs"
 	"github.com/RichardKnop/machinery/v1/brokers/iface"
 	"github.com/RichardKnop/machinery/v1/common"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
 	"github.com/RichardKnop/machinery/v1/tasks"
-	"github.com/RichardKnop/redsync"
-	"github.com/go-redis/redis"
 )
 
 // BrokerGR represents a Redis broker
@@ -29,9 +30,10 @@ type BrokerGR struct {
 	processingWG sync.WaitGroup // use wait group to make sure task processing completes
 	delayedWG    sync.WaitGroup
 	// If set, path to a socket file overrides hostname
-	socketPath string
-	redsync    *redsync.Redsync
-	redisOnce  sync.Once
+	socketPath           string
+	redsync              *redsync.Redsync
+	redisOnce            sync.Once
+	redisDelayedTasksKey string
 }
 
 // NewGR creates new Broker instance
@@ -57,7 +59,9 @@ func NewGR(cnf *config.Config, addrs []string, db int) iface.Broker {
 
 	b.rclient = redis.NewUniversalClient(ropt)
 	if cnf.Redis.DelayedTasksKey != "" {
-		redisDelayedTasksKey = cnf.Redis.DelayedTasksKey
+		b.redisDelayedTasksKey = cnf.Redis.DelayedTasksKey
+	} else {
+		b.redisDelayedTasksKey = defaultRedisDelayedTasksKey
 	}
 	return b
 }
@@ -74,7 +78,7 @@ func (b *BrokerGR) StartConsuming(consumerTag string, concurrency int, taskProce
 	b.Broker.StartConsuming(consumerTag, concurrency, taskProcessor)
 
 	// Ping the server to make sure connection is live
-	_, err := b.rclient.Ping().Result()
+	_, err := b.rclient.Ping(context.Background()).Result()
 	if err != nil {
 		b.GetRetryFunc()(b.GetRetryStopChan())
 
@@ -134,7 +138,7 @@ func (b *BrokerGR) StartConsuming(consumerTag string, concurrency int, taskProce
 			case <-b.GetStopChan():
 				return
 			default:
-				task, err := b.nextDelayedTask(redisDelayedTasksKey)
+				task, err := b.nextDelayedTask(b.redisDelayedTasksKey)
 				if err != nil {
 					continue
 				}
@@ -191,12 +195,12 @@ func (b *BrokerGR) Publish(ctx context.Context, signature *tasks.Signature) erro
 
 		if signature.ETA.After(now) {
 			score := signature.ETA.UnixNano()
-			err = b.rclient.ZAdd(redisDelayedTasksKey, redis.Z{Score: float64(score), Member: msg}).Err()
+			err = b.rclient.ZAdd(context.Background(), b.redisDelayedTasksKey, &redis.Z{Score: float64(score), Member: msg}).Err()
 			return err
 		}
 	}
 
-	err = b.rclient.RPush(signature.RoutingKey, msg).Err()
+	err = b.rclient.RPush(context.Background(), signature.RoutingKey, msg).Err()
 	return err
 }
 
@@ -206,7 +210,7 @@ func (b *BrokerGR) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	if queue == "" {
 		queue = b.GetConfig().DefaultQueue
 	}
-	results, err := b.rclient.LRange(queue, 0, -1).Result()
+	results, err := b.rclient.LRange(context.Background(), queue, 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +230,7 @@ func (b *BrokerGR) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 
 // GetDelayedTasks returns a slice of task signatures that are scheduled, but not yet in the queue
 func (b *BrokerGR) GetDelayedTasks() ([]*tasks.Signature, error) {
-	results, err := b.rclient.ZRange(redisDelayedTasksKey, 0, -1).Result()
+	results, err := b.rclient.ZRange(context.Background(), b.redisDelayedTasksKey, 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +308,7 @@ func (b *BrokerGR) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor
 	if !b.IsTaskRegistered(signature.Name) {
 		log.INFO.Printf("Task not registered with this worker. Requeuing message: %s", delivery)
 
-		b.rclient.RPush(getQueueGR(b.GetConfig(), taskProcessor), delivery)
+		b.rclient.RPush(context.Background(), getQueueGR(b.GetConfig(), taskProcessor), delivery)
 		return nil
 	}
 
@@ -325,7 +329,7 @@ func (b *BrokerGR) nextTask(queue string) (result []byte, err error) {
 	}
 	pollPeriod := time.Duration(pollPeriodMilliseconds) * time.Millisecond
 
-	items, err := b.rclient.BLPop(pollPeriod, queue).Result()
+	items, err := b.rclient.BLPop(context.Background(), pollPeriod, queue).Result()
 	if err != nil {
 		return []byte{}, err
 	}
@@ -356,7 +360,6 @@ func (b *BrokerGR) nextDelayedTask(key string) (result []byte, err error) {
 
 	var (
 		items []string
-		reply interface{}
 	)
 
 	pollPeriod := 500 // default poll period for delayed tasks
@@ -378,7 +381,8 @@ func (b *BrokerGR) nextDelayedTask(key string) (result []byte, err error) {
 			now := time.Now().UTC().UnixNano()
 
 			// https://redis.io/commands/zrangebyscore
-			items, err = tx.ZRevRangeByScore(key, redis.ZRangeBy{
+			ctx := context.Background()
+			items, err = tx.ZRevRangeByScore(ctx, key, &redis.ZRangeBy{
 				Min: "0", Max: strconv.FormatInt(now, 10), Offset: 0, Count: 1,
 			}).Result()
 			if err != nil {
@@ -388,22 +392,20 @@ func (b *BrokerGR) nextDelayedTask(key string) (result []byte, err error) {
 				return redis.Nil
 			}
 
-			return nil
+			// only return the first zrange value if there are no other changes in this key
+			// to make sure a delayed task would only be consumed once
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.ZRem(ctx, key, items[0])
+				result = []byte(items[0])
+				return nil
+			})
 
+			return err
 		}
-		if err = b.rclient.Watch(watchFunc, key); err != nil {
+
+		if err = b.rclient.Watch(context.Background(), watchFunc, key); err != nil {
 			return
-		}
-
-		txpipe := b.rclient.TxPipeline()
-		txpipe.ZRem(key, items[0])
-		reply, err = txpipe.Exec()
-		if err != nil {
-			return
-		}
-
-		if reply != nil {
-			result = []byte(items[0])
+		} else {
 			break
 		}
 	}

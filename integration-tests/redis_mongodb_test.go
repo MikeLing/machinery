@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/RichardKnop/machinery/v1"
 	"github.com/RichardKnop/machinery/v1/config"
 )
 
@@ -24,9 +25,11 @@ func TestRedisMongodb(t *testing.T) {
 		DefaultQueue:    "test_queue",
 		ResultsExpireIn: 30,
 		ResultBackend:   fmt.Sprintf("mongodb://%v", mongodbURL),
+		Lock:            fmt.Sprintf("redis://%v", redisURL),
 	})
-	worker := server.NewWorker("test_worker", 0)
+
+	worker := server.(*machinery.Server).NewWorker("test_worker", 0)
+	defer worker.Quit()
 	go worker.Launch()
 	testAll(server, t)
-	worker.Quit()
 }

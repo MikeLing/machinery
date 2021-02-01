@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
-	machinery "github.com/RichardKnop/machinery/v1"
+
+	"github.com/RichardKnop/machinery/v1"
 	"github.com/RichardKnop/machinery/v1/config"
 )
 
@@ -39,7 +40,7 @@ func createGCPPubSubTopicAndSubscription(cli *pubsub.Client, topicName, subscrip
 	}
 
 	if !subExists {
-		sub, err = cli.CreateSubscription(ctx, subscriptionName, pubsub.SubscriptionConfig{
+		_, err = cli.CreateSubscription(ctx, subscriptionName, pubsub.SubscriptionConfig{
 			Topic:       topic,
 			AckDeadline: 10 * time.Second,
 		})
@@ -87,13 +88,14 @@ func TestGCPPubSubRedis(t *testing.T) {
 		Broker:        pubsubURL,
 		DefaultQueue:  topicName,
 		ResultBackend: fmt.Sprintf("redis://%v", redisURL),
+		Lock:          fmt.Sprintf("redis://%v", redisURL),
 		GCPPubSub: &config.GCPPubSubConfig{
 			Client: pubsubClient,
 		},
 	})
 
-	worker := server.NewWorker("test_worker", 0)
+	worker := server.(*machinery.Server).NewWorker("test_worker", 0)
+	defer worker.Quit()
 	go worker.Launch()
 	testAll(server, t)
-	worker.Quit()
 }

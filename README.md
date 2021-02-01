@@ -22,6 +22,7 @@ Machinery is an asynchronous task queue/job queue based on distributed message p
 * [V2 Experiment](#v2-experiment)
 * [First Steps](#first-steps)
 * [Configuration](#configuration)
+  * [Lock](#lock)
   * [Broker](#broker)
   * [DefaultQueue](#defaultqueue)
   * [ResultBackend](#resultbackend)
@@ -46,6 +47,11 @@ Machinery is an asynchronous task queue/job queue based on distributed message p
   * [Groups](#groups)
   * [Chords](#chords)
   * [Chains](#chains)
+* [Periodic Tasks & Workflows](#periodic-tasks--workflows)
+  * [Periodic Tasks](#periodic-tasks)
+  * [Periodic Groups](#periodic-groups)
+  * [Periodic Chains](#periodic-chains)
+  * [Periodic Chords](#periodic-chords)
 * [Development](#development)
   * [Requirements](#requirements)
   * [Dependencies](#dependencies)
@@ -84,18 +90,28 @@ go get github.com/RichardKnop/machinery/v1
 
 First, you will need to define some tasks. Look at sample tasks in `example/tasks/tasks.go` to see a few examples.
 
-Second, you will need to launch a worker process:
+Second, you will need to launch a worker process with one of these commands (v2 is recommended since it doesn't import dependencies for all brokers / backends, only those you actually need):
 
 ```sh
-go run example/machinery.go -c example/config.yml worker
+go run example/v2/amqp/main.go worker
+go run example/v2/redigo/main.go worker // Redis with redigo driver
+go run example/v2/go-redis/main.go worker // Redis with Go Redis driver
+
+go run example/v1/amqp/main.go worker
+go run example/v1/redis/main.go worker
 ```
 
 ![Example worker][1]
 
-Finally, once you have a worker running and waiting for tasks to consume, send some tasks:
+Finally, once you have a worker running and waiting for tasks to consume, send some tasks with one of these commands (v2 is recommended since it doesn't import dependencies for all brokers / backends, only those you actually need):
 
 ```sh
-go run example/machinery.go -c example/config.yml send
+go run example/v2/amqp/main.go send
+go run example/v2/redigo/main.go send // Redis with redigo driver
+go run example/v2/go-redis/main.go send // Redis with Go Redis driver
+
+go run example/v1/amqp/main.go send
+go run example/v1/redis/main.go send
 ```
 
 You will be able to see the tasks being processed asynchronously by the worker:
@@ -107,7 +123,7 @@ You will be able to see the tasks being processed asynchronously by the worker:
 The [config](/v1/config/config.go) package has convenience methods for loading configuration from environment variables or a YAML file. For example, load configuration from environment variables:
 
 ```go
-cnf, err := config.NewFromEnvironment(true)
+cnf, err := config.NewFromEnvironment()
 ```
 
 Or load from YAML file:
@@ -119,6 +135,20 @@ cnf, err := config.NewFromYaml("config.yml", true)
 Second boolean flag enables live reloading of configuration every 10 seconds. Use `false` to disable live reloading.
 
 Machinery configuration is encapsulated by a `Config` struct and injected as a dependency to objects that need it.
+
+#### Lock
+
+##### Redis
+
+Use Redis URL in one of these formats:
+
+```
+redis://[password@]host[port][/db_num]
+```
+
+For example:
+
+1. `redis://localhost:6379`, or with password `redis://password@localhost:6379`
 
 #### Broker
 
@@ -362,10 +392,10 @@ import (
 )
 
 var cnf = &config.Config{
-  Broker:             "amqp://guest:guest@localhost:5672/",
-  DefaultQueue:       "machinery_tasks",
-  ResultBackend:      "amqp://guest:guest@localhost:5672/",
-  AMQP:               &config.AMQPConfig{
+  Broker:        "amqp://guest:guest@localhost:5672/",
+  DefaultQueue:  "machinery_tasks",
+  ResultBackend: "amqp://guest:guest@localhost:5672/",
+  AMQP: &config.AMQPConfig{
     Exchange:     "machinery_exchange",
     ExchangeType: "direct",
     BindingKey:   "machinery_task",
@@ -707,7 +737,7 @@ fmt.Printf("Current state of %v task is:\n", taskState.TaskUUID)
 fmt.Println(taskState.State)
 ```
 
-There are couple of convenient me methods to inspect the task status:
+There are couple of convenient methods to inspect the task status:
 
 ```go
 asyncResult.GetState().IsCompleted()
@@ -965,13 +995,188 @@ for _, result := range results {
 }
 ```
 
+### Periodic Tasks & Workflows
+
+Machinery now supports scheduling periodic tasks and workflows. See examples bellow.
+
+#### Periodic Tasks
+
+```go
+import (
+  "github.com/RichardKnop/machinery/v1/tasks"
+)
+
+signature := &tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+  },
+}
+
+err := server.RegisterPeriodTask("0 6 * * ?", "periodic-task", signature)
+if err != nil {
+  // failed to register periodic task
+}
+```
+
+#### Periodic Groups
+
+```go
+import (
+  "github.com/RichardKnop/machinery/v1/tasks"
+  "github.com/RichardKnop/machinery/v1"
+)
+
+signature1 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+  },
+}
+
+signature2 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+  },
+}
+
+group, _ := tasks.NewGroup(&signature1, &signature2)
+err := server.RegisterPeriodGroup("0 6 * * ?", "periodic-group", group)
+if err != nil {
+  // failed to register periodic group
+}
+```
+
+#### Periodic Chains
+
+```go
+import (
+  "github.com/RichardKnop/machinery/v1/tasks"
+  "github.com/RichardKnop/machinery/v1"
+)
+
+signature1 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+  },
+}
+
+signature2 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+  },
+}
+
+signature3 := tasks.Signature{
+  Name: "multiply",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 4,
+    },
+  },
+}
+
+chain, _ := tasks.NewChain(&signature1, &signature2, &signature3)
+err := server.RegisterPeriodChain("0 6 * * ?", "periodic-chain", chain)
+if err != nil {
+  // failed to register periodic chain
+}
+```
+
+#### Chord
+
+```go
+import (
+  "github.com/RichardKnop/machinery/v1/tasks"
+  "github.com/RichardKnop/machinery/v1"
+)
+
+signature1 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+    {
+      Type:  "int64",
+      Value: 1,
+    },
+  },
+}
+
+signature2 := tasks.Signature{
+  Name: "add",
+  Args: []tasks.Arg{
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+    {
+      Type:  "int64",
+      Value: 5,
+    },
+  },
+}
+
+signature3 := tasks.Signature{
+  Name: "multiply",
+}
+
+group := tasks.NewGroup(&signature1, &signature2)
+chord, _ := tasks.NewChord(group, &signature3)
+err := server.RegisterPeriodChord("0 6 * * ?", "periodic-chord", chord)
+if err != nil {
+  // failed to register periodic chord
+}
+```
+
 ### Development
 
 #### Requirements
 
 * Go
 * RabbitMQ (optional)
-* Redis (optional)
+* Redis
 * Memcached (optional)
 * MongoDB (optional)
 
