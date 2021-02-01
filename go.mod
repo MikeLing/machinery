@@ -1,4 +1,4 @@
-module github.com/RichardKnop/machinery
+module github.com/MikeLing/machinery
 
 require (
 	cloud.google.com/go v0.53.0 // indirect
