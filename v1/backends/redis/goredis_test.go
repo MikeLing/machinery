@@ -1,14 +1,15 @@
 package redis_test
 
 import (
-	"github.com/RichardKnop/machinery/v1/backends/iface"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/RichardKnop/machinery/v1/backends/redis"
-	"github.com/RichardKnop/machinery/v1/config"
-	"github.com/RichardKnop/machinery/v1/tasks"
+	"github.com/MikeLing/machinery/v1/backends/iface"
+
+	"github.com/MikeLing/machinery/v1/backends/redis"
+	"github.com/MikeLing/machinery/v1/config"
+	"github.com/MikeLing/machinery/v1/tasks"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -91,7 +92,6 @@ func TestGetStateGR(t *testing.T) {
 		GroupUUID: "testGroupUUID",
 	}
 
-
 	backend.PurgeState("testTaskUUID")
 
 	var (
@@ -149,7 +149,6 @@ func TestPurgeStateGR(t *testing.T) {
 		UUID:      "testTaskUUID",
 		GroupUUID: "testGroupUUID",
 	}
-
 
 	backend.SetStatePending(signature)
 	taskState, err := backend.GetState(signature.UUID)

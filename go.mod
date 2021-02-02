@@ -5,7 +5,7 @@ go 1.15
 require (
 	cloud.google.com/go/pubsub v1.9.1
 	github.com/RichardKnop/logging v0.0.0-20190827224416-1a693bdd4fae
-	github.com/RichardKnop/machinery v1.10.0
+	github.com/RichardKnop/machinery v1.10.0 // indirect
 	github.com/RichardKnop/machinery/v2 v2.0.3 // indirect
 	github.com/RichardKnop/redsync v1.2.0
 	github.com/aws/aws-sdk-go v1.37.1

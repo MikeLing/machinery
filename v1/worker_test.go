@@ -1,9 +1,10 @@
 package machinery_test
 
 import (
-	"github.com/RichardKnop/machinery/v1"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/MikeLing/machinery/v1"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRedactURL(t *testing.T) {

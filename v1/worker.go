@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RichardKnop/machinery/v1/backends/amqp"
-	"github.com/RichardKnop/machinery/v1/brokers/errs"
-	"github.com/RichardKnop/machinery/v1/log"
-	"github.com/RichardKnop/machinery/v1/retry"
-	"github.com/RichardKnop/machinery/v1/tasks"
-	"github.com/RichardKnop/machinery/v1/tracing"
+	"github.com/MikeLing/machinery/v1/backends/amqp"
+	"github.com/MikeLing/machinery/v1/brokers/errs"
+	"github.com/MikeLing/machinery/v1/log"
+	"github.com/MikeLing/machinery/v1/retry"
+	"github.com/MikeLing/machinery/v1/tasks"
+	"github.com/MikeLing/machinery/v1/tracing"
 	"github.com/opentracing/opentracing-go"
 )
 
